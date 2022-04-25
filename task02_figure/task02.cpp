@@ -15,6 +15,7 @@ GLFWwindow* window;
 using namespace glm;
 
 #include <common/shader.hpp>
+#include "model.h"
 
 int main( void )
 {
@@ -30,10 +31,10 @@ int main( void )
     glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 3);
     glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 3);
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE); // To make MacOS happy; should not be needed
-    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE); //We don't want the old OpenGL 
+    glfwWindowHint(GLFW_OPENGL_PROFILE, GLFW_OPENGL_CORE_PROFILE);
 
     // Open a window and create its OpenGL context
-    window = glfwCreateWindow( 1024, 768, "Tutorial 03 - Matrices", NULL, NULL);
+    window = glfwCreateWindow( 1024, 768, "Tutorial 04 - Colored Cube", NULL, NULL);
     if( window == NULL ){
         fprintf( stderr, "Failed to open GLFW window. If you have an Intel GPU, they are not 3.3 compatible. Try the 2.1 version of the tutorials.\n" );
         getchar();
@@ -57,26 +58,26 @@ int main( void )
     // Dark blue background
     glClearColor(0.0f, 0.0f, 0.1f, 0.0f);
 
+    // Enable depth test
+    glEnable(GL_DEPTH_TEST);
+    // Accept fragment if it closer to the camera than the former one
+    glDepthFunc(GL_LESS); 
+
     GLuint VertexArrayID;
     glGenVertexArrays(1, &VertexArrayID);
     glBindVertexArray(VertexArrayID);
 
     // Create and compile our GLSL program from the shaders
-    GLuint programID_1 = LoadShaders( "VertexShader.vertexshader", "FragmentShader1.fragmentshader" );
-    GLuint programID_2 = LoadShaders( "VertexShader.vertexshader", "FragmentShader2.fragmentshader" );
+    GLuint programID = LoadShaders( "TransformVertexShader.vertexshader", "ColorFragmentShader.fragmentshader" );
 
     // Get a handle for our "MVP" uniform
-    GLuint MatrixID_1 = glGetUniformLocation(programID_1, "MVP");
-    GLuint MatrixID_2 = glGetUniformLocation(programID_2, "MVP");
+    GLuint MatrixID = glGetUniformLocation(programID, "MVP");
 
     // Projection matrix : 45° Field of View, 4:3 ratio, display range : 0.1 unit <-> 100 units
     glm::mat4 Projection = glm::perspective(glm::radians(45.0f), 4.0f / 3.0f, 0.1f, 100.0f);
-    // Or, for an ortho camera :
-    //glm::mat4 Projection = glm::ortho(-10.0f,10.0f,-10.0f,10.0f,0.0f,100.0f); // In world coordinates
-    
     // Camera matrix
     glm::mat4 View       = glm::lookAt(
-                                glm::vec3(0,3,4), // Camera is at (4,3,3), in World Space
+                                glm::vec3(4,2,-3), // Camera is at (4,3,-3), in World Space
                                 glm::vec3(0,0,0), // and looks at the origin
                                 glm::vec3(0,1,0)  // Head is up (set to 0,-1,0 to look upside-down)
                            );
@@ -85,36 +86,29 @@ int main( void )
     // Our ModelViewProjection : multiplication of our 3 matrices
     glm::mat4 MVP        = Projection * View * Model; // Remember, matrix multiplication is the other way around
 
-    static const GLfloat g_vertex_buffer_data[] = { 
-        -0.95f, -0.7f, 0.5f,
-         0.7f, -0.7f, -0.5f,
-         -0.3f,  0.7f, 0.0f,
-         -0.7f, -0.7f, -0.5f,
-         0.95f, -0.7f, 0.5f,
-         0.3f,  0.7f, 0.0f,
-    };
-
     GLuint vertexbuffer;
     glGenBuffers(1, &vertexbuffer);
     glBindBuffer(GL_ARRAY_BUFFER, vertexbuffer);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(g_vertex_buffer_data), g_vertex_buffer_data, GL_STATIC_DRAW);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(model::g_vertex_buffer_data), model::g_vertex_buffer_data, GL_STATIC_DRAW);
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+    GLuint colorbuffer;
+    glGenBuffers(1, &colorbuffer);
+    glBindBuffer(GL_ARRAY_BUFFER, colorbuffer);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(model::g_color_buffer_data), model::g_color_buffer_data, GL_STATIC_DRAW);
 
     do{
 
         // Clear the screen
-        glClear( GL_COLOR_BUFFER_BIT );
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
 
         // Use our shader
-        glUseProgram(programID_1);
+        glUseProgram(programID);
 
-        View = glm::rotate(View, glm::radians(1.0f), glm::vec3(0,1,0));
+        View = glm::rotate(View, glm::radians(0.5f), glm::vec3(0,1,0));
         glm::mat4 MVP = Projection * View * Model;
         // Send our transformation to the currently bound shader, 
         // in the "MVP" uniform
-        glUniformMatrix4fv(MatrixID_1, 1, GL_FALSE, &MVP[0][0]);
+        glUniformMatrix4fv(MatrixID, 1, GL_FALSE, &MVP[0][0]);
 
         // 1rst attribute buffer : vertices
         glEnableVertexAttribArray(0);
@@ -128,13 +122,23 @@ int main( void )
             (void*)0            // array buffer offset
         );
 
+        // 2nd attribute buffer : colors
+        glEnableVertexAttribArray(1);
+        glBindBuffer(GL_ARRAY_BUFFER, colorbuffer);
+        glVertexAttribPointer(
+            1,                                // attribute. No particular reason for 1, but must match the layout in the shader.
+            3,                                // size
+            GL_FLOAT,                         // type
+            GL_FALSE,                         // normalized?
+            0,                                // stride
+            (void*)0                          // array buffer offset
+        );
+
         // Draw the triangle !
-        glDrawArrays(GL_TRIANGLES, 0, 3); // 3 indices starting at 0 -> 1 triangle
-        glUseProgram(programID_2);
-        glUniformMatrix4fv(MatrixID_2, 1, GL_FALSE, &MVP[0][0]);
-        glDrawArrays(GL_TRIANGLES, 3, 3); // 3 indices starting at 0 -> 1 triangle
+        glDrawArrays(GL_TRIANGLES, 0, 24*3); // 12*3 indices starting at 0 -> 12 triangles
 
         glDisableVertexAttribArray(0);
+        glDisableVertexAttribArray(1);
 
         // Swap buffers
         glfwSwapBuffers(window);
@@ -146,8 +150,8 @@ int main( void )
 
     // Cleanup VBO and shader
     glDeleteBuffers(1, &vertexbuffer);
-    glDeleteProgram(programID_2);
-    glDeleteProgram(programID_1);
+    glDeleteBuffers(1, &colorbuffer);
+    glDeleteProgram(programID);
     glDeleteVertexArrays(1, &VertexArrayID);
 
     // Close OpenGL window and terminate GLFW
